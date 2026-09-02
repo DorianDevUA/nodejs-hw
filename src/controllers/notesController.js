@@ -3,13 +3,59 @@ import createHttpError from 'http-errors';
 
 // Отримання всіх нотаток
 export const getAllNotes = async (req, res) => {
-  const notes = await Note.find();
+  // Отримуємо параметри запиту
+  const {
+    page = 1,
+    perPage = 10,
+    search,
+    tag,
+    sortBy = '_id',
+    sortOrder = 'asc',
+  } = req.query;
 
-  if (!notes) {
+  const skip = (page - 1) * perPage;
+
+  // Створюємо базовий запит до колекції
+  const notesQuery = Note.find();
+
+  // Будуємо фільтр за тегом
+  if (tag) {
+    notesQuery.where('tag').eq(tag);
+  }
+
+  // Будуємо фільтр за пошуковим запитом серед title та content
+  if (search) {
+    notesQuery.where({
+      $or: [
+        { title: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } },
+      ],
+    });
+  }
+
+  // Виконуємо одразу два запити паралельно
+  const [totalNotes, notes] = await Promise.all([
+    notesQuery.clone().countDocuments(),
+    notesQuery
+      .skip(skip)
+      .limit(perPage)
+      .sort({ [sortBy]: sortOrder }),
+  ]);
+
+  // Обчислюємо загальну кількість «сторінок»
+  const totalPages = Math.ceil(totalNotes / perPage);
+
+  if (!notes.length) {
     throw createHttpError(404, 'Notes not found');
   }
 
-  res.status(200).json(notes);
+  res.status(200).json({
+    page,
+    perPage,
+    totalNotes,
+    totalPages,
+    notes,
+  });
 };
 
 export const getNoteById = async (req, res) => {
