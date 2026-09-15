@@ -11,9 +11,9 @@ const transporter = nodemailer.createTransport({
     pass: SMTP_PASSWORD,
   },
   // костиль
-  tls: {
-    rejectUnauthorized: false, // Игнорировать ошибки сертификатов
-  },
+  // tls: {
+  //   rejectUnauthorized: false, // Игнорировать ошибки сертификатов
+  // },
 });
 
 export const sendEmail = async (options) => {
