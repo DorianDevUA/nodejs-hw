@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import handlebars from 'handlebars';
 import fs from 'fs/promises';
 import path from 'path';
-import { sendEmail } from '../utils/sendEmail.js';
+import { sendMail } from '../utils/sendMail.js';
 import {
   createSession,
   setSessionCookies,
@@ -164,7 +164,7 @@ export const requestResetEmail = async (req, res) => {
       html,
     };
 
-    await sendEmail(mailOptions);
+    await sendMail(mailOptions);
   } catch (error) {
     console.log(error);
     throw createHttpError(
