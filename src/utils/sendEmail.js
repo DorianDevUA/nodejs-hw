@@ -10,10 +10,6 @@ const transporter = nodemailer.createTransport({
     user: SMTP_USER,
     pass: SMTP_PASSWORD,
   },
-  // костиль
-  // tls: {
-  //   rejectUnauthorized: false, // Игнорировать ошибки сертификатов
-  // },
 });
 
 export const sendEmail = async (options) => {
