@@ -1,5 +1,10 @@
 import bcrypt from 'bcrypt';
 import createHttpError from 'http-errors';
+import jwt from 'jsonwebtoken';
+import handlebars from 'handlebars';
+import fs from 'fs/promises';
+import path from 'path';
+import { sendEmail } from '../utils/sendEmail.js';
 import {
   createSession,
   setSessionCookies,
@@ -7,6 +12,8 @@ import {
 } from '../services/auth.js';
 import { User } from '../models/user.js';
 import { Session } from '../models/session.js';
+
+const { JWT_SECRET, FRONTEND_DOMAIN, SMTP_FROM } = process.env;
 
 export const registerUser = async (req, res) => {
   const { email, password } = req.body;
@@ -112,4 +119,89 @@ export const refreshUserSession = async (req, res) => {
   setSessionCookies(res, newSession);
 
   res.status(200).json({ message: 'Session refreshed' });
+};
+
+export const requestResetEmail = async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+
+  // Якщо користувача немає в нашій БД — навмисно повертаємо "успішну"
+  // відповідь без відправлення листа (anti user enumeration).
+  if (!user) {
+    return res.status(200).json({
+      message: 'Password reset email sent successfully',
+    });
+  }
+
+  // Користувач є — генеруємо короткоживучий JWT і відправляємо лист
+  const payload = { sub: user._id, email };
+  const tokenOptions = {
+    expiresIn: '15m',
+  };
+  const resetToken = jwt.sign(payload, JWT_SECRET, tokenOptions);
+
+  // 1. Формуємо шлях до шаблона
+  const templatePath = path.resolve('src/templates/reset-password-email.html');
+  // 2. Читаємо шаблон
+  const templateSource = await fs.readFile(templatePath, 'utf-8');
+  // 3. Готуємо шаблон до заповнення
+  const resetPasswordTpl = handlebars.compile(templateSource);
+  // 4. Формуємо із шаблона HTML документ з динамічними даними
+  const html = resetPasswordTpl({
+    name: user.username,
+    link: `${FRONTEND_DOMAIN}/reset-password?token=${resetToken}`,
+  });
+
+  // Обгортання sendEmail у try/catch дає
+  // коректну відповідь 500 у випадку збою поштового сервісу
+  try {
+    const mailOptions = {
+      from: `Aze Shooting Sport <${SMTP_FROM}>`,
+      to: email,
+      subject: 'Reset your password',
+      // 5. Передаємо HTML у функцію надписання пошти
+      html,
+    };
+
+    await sendEmail(mailOptions);
+  } catch (error) {
+    console.log(error);
+    throw createHttpError(
+      500,
+      'Failed to send the email, please try again later.',
+    );
+  }
+
+  // Та сама "нейтральна" відповідь
+  res.status(200).json({ message: 'Password reset email sent successfully' });
+};
+
+export const resetPassword = async (req, res) => {
+  const { token, password } = req.body;
+
+  // 1. Перевіряємо/декодуємо токен
+  let payload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch {
+    // Повертаємо помилку якщо проблема при декодуванні
+    throw createHttpError(401, 'Invalid or expired token');
+  }
+
+  // 2. Шукаємо користувача
+  const user = await User.findOne({ _id: payload.sub, email: payload.email });
+  if (!user) {
+    throw createHttpError(404, 'User not found');
+  }
+
+  // 3. Якщо користувач існує: створюємо новий пароль і оновлюємо користувача
+  const hashedPassword = await bcrypt.hash(password, 10);
+  await User.updateOne({ _id: user._id }, { password: hashedPassword });
+
+  // 4. Інвалідовуємо всі можливі попередні сесії користувача
+  await Session.deleteMany({ userId: user._id });
+
+  // 5. Повертаємо успішну відповідь
+  res.status(200).json({ message: 'Password reset successfully' });
 };
